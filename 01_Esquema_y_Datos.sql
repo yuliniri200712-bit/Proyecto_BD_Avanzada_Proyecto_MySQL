@@ -103,7 +103,7 @@ CREATE TABLE ventas (
     id_cliente   INT NOT NULL,
     id_sucursal  INT NOT NULL DEFAULT 1,
     fecha_venta  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    estado       ENUM('Pendiente de Pago','Pagado','Procesando','Enviado','Entregado','Cancelado','Devuelto')
+    estado       ENUM('Pendiente de Pago','Pagado','Procesando','Enviado','Entregado','Cancelado','Devolución Parcial','Devuelto Totalmente')
                  NOT NULL DEFAULT 'Pendiente de Pago',
     total        DECIMAL(14,2) NOT NULL DEFAULT 0,
     direccion_envio VARCHAR(255) NULL COMMENT 'Dirección de despacho de este pedido',
@@ -175,7 +175,7 @@ CREATE TABLE resenas (
     FOREIGN KEY (id_cliente)  REFERENCES clientes(id_cliente)
 );
 
--- Créditos a favor del cliente (sp_ProcesarDevolucion)
+-- Créditos a favor del cliente (los genera sp_ProcesarDevolucion, ver 08_Devoluciones.sql)
 CREATE TABLE creditos_cliente (
     id_credito  INT AUTO_INCREMENT PRIMARY KEY,
     id_cliente  INT NOT NULL,
@@ -396,7 +396,7 @@ JOIN (
     SELECT d.id_producto, SUM(d.cantidad) AS unidades_vendidas
     FROM detalle_ventas d
     JOIN ventas v ON v.id_venta = d.id_venta
-    WHERE v.estado NOT IN ('Cancelado','Devuelto')
+    WHERE v.estado NOT IN ('Cancelado','Devuelto Totalmente')
     GROUP BY d.id_producto
 ) vendidas ON vendidas.id_producto = p.id_producto
 SET p.stock = p.stock - vendidas.unidades_vendidas;
@@ -412,7 +412,7 @@ UPDATE ventas v JOIN clientes c ON c.id_cliente = v.id_cliente SET v.direccion_e
 -- Totales acumulados por cliente (sólo ventas no canceladas)
 UPDATE clientes c
 SET total_gastado = (SELECT COALESCE(SUM(v.total),0) FROM ventas v
-                     WHERE v.id_cliente = c.id_cliente AND v.estado NOT IN ('Cancelado','Devuelto')),
+                     WHERE v.id_cliente = c.id_cliente AND v.estado NOT IN ('Cancelado','Devuelto Totalmente')),
     fecha_ultimo_pedido = (SELECT MAX(v.fecha_venta) FROM ventas v WHERE v.id_cliente = c.id_cliente);
 
 INSERT INTO visitas_producto (id_producto, id_cliente, fecha_visita) VALUES

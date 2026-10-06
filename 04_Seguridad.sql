@@ -278,18 +278,27 @@ FLUSH PRIVILEGES;
 
 -- ---------------------------------------------------------------------
 -- 15. Política de contraseñas seguras para TODOS los usuarios
---     INSTALL COMPONENT no admite "IF NOT EXISTS", así que solo se instala si el
---     componente aún no está registrado en mysql.component (evita el error 3529).
+--     INSTALL COMPONENT no admite "IF NOT EXISTS" ni puede ejecutarse con
+--     PREPARE (error 1295), pero sí dentro de un procedimiento almacenado. Por eso
+--     un procedimiento temporal lo instala solo si aún no está registrado en
+--     mysql.component (evita el error 3529 al re-ejecutar el script) y luego se borra.
 --     Todas las contraseñas de este script ya cumplen la política STRONG.
 -- ---------------------------------------------------------------------
-SET @sql_validate_password = IF(
-    (SELECT COUNT(*) FROM mysql.component
-      WHERE component_urn = 'file://component_validate_password') = 0,
-    'INSTALL COMPONENT ''file://component_validate_password''',
-    'SELECT ''validate_password ya estaba instalado'' AS aviso');
-PREPARE stmt_validate_password FROM @sql_validate_password;
-EXECUTE stmt_validate_password;
-DEALLOCATE PREPARE stmt_validate_password;
+DROP PROCEDURE IF EXISTS sp_tmp_instalar_validate_password;
+DELIMITER $$
+CREATE PROCEDURE sp_tmp_instalar_validate_password()
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM mysql.component
+                    WHERE component_urn = 'file://component_validate_password') THEN
+        INSTALL COMPONENT 'file://component_validate_password';
+        SELECT 'validate_password instalado' AS aviso;
+    ELSE
+        SELECT 'validate_password ya estaba instalado' AS aviso;
+    END IF;
+END$$
+DELIMITER ;
+CALL sp_tmp_instalar_validate_password();
+DROP PROCEDURE sp_tmp_instalar_validate_password;
 SET PERSIST validate_password.policy               = 'STRONG';  -- mayús., minús., número, símbolo y diccionario
 SET PERSIST validate_password.length               = 10;
 SET PERSIST validate_password.mixed_case_count     = 1;

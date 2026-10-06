@@ -2,7 +2,7 @@
 
 ## Descripción breve
 
-Este proyecto implementa el núcleo de la base de datos de una tienda en línea sobre **MySQL 8.0**. Gestiona el catálogo de productos, las categorías, los proveedores, los clientes y todo el ciclo de vida de las ventas (orden → pago → despacho → entrega → devolución), garantizando la integridad de los datos con llaves foráneas, restricciones `CHECK`, triggers y transacciones. Sobre ese núcleo se construyen 20 consultas analíticas, 20 funciones, un esquema de seguridad con roles y usuarios, los 20 requisitos de triggers (cubiertos por triggers principales y auxiliares), 20 eventos programados y 20 procedimientos almacenados. El precio de cada producto vendido queda **congelado** en `detalle_ventas.precio_unitario_congelado`, de modo que el historial de ventas no cambia aunque el precio del catálogo cambie.
+Este proyecto implementa el núcleo de la base de datos de una tienda en línea sobre **MySQL 8.0**. Gestiona el catálogo de productos, las categorías, los proveedores, los clientes y todo el ciclo de vida de las ventas (orden → pago → despacho → entrega → devolución parcial o total), garantizando la integridad de los datos con llaves foráneas, restricciones `CHECK`, triggers y transacciones. Sobre ese núcleo se construyen 20 consultas analíticas, 20 funciones, un esquema de seguridad con roles y usuarios, los 20 requisitos de triggers (cubiertos por triggers principales y auxiliares), 20 eventos programados y 20 procedimientos almacenados. El precio de cada producto vendido queda **congelado** en `detalle_ventas.precio_unitario_congelado`, de modo que el historial de ventas no cambia aunque el precio del catálogo cambie.
 
 ## Integrantes
 
@@ -30,7 +30,8 @@ Ejecute los archivos **en este orden**, desde la raíz del repositorio:
 | 4 | `04_Seguridad.sql` | Crea roles, usuarios, vistas seguras y permisos. |
 | 5 | `05_Triggers.sql` | Crea las tablas de auditoría (`log_cambios_precio`, etc.) y los triggers requeridos y auxiliares. |
 | 6 | `06_Eventos.sql` | Crea las tablas de reportes (`reporte_ventas_semanales`, etc.), los 20 eventos y activa el `event_scheduler`. |
-| 7 | `07_Procedimientos_Almacenados.sql` | Crea los 20 procedimientos almacenados. |
+| 7 | `07_Procedimientos_Almacenados.sql` | Crea 19 de los 20 procedimientos almacenados. |
+| 8 | `08_Devoluciones.sql` | Crea la tabla `devoluciones` y el procedimiento transaccional `sp_ProcesarDevolucion` (ver [`DOCUMENTACION_DEVOLUCIONES.md`](DOCUMENTACION_DEVOLUCIONES.md)). |
 
 Desde la terminal:
 
@@ -42,6 +43,7 @@ mysql -u root -p --default-character-set=utf8mb4 < 04_Seguridad.sql
 mysql -u root -p --default-character-set=utf8mb4 < 05_Triggers.sql
 mysql -u root -p --default-character-set=utf8mb4 < 06_Eventos.sql
 mysql -u root -p --default-character-set=utf8mb4 < 07_Procedimientos_Almacenados.sql
+mysql -u root -p --default-character-set=utf8mb4 < 08_Devoluciones.sql
 ```
 
 O, dentro del cliente `mysql`: `SOURCE 01_Esquema_y_Datos.sql;` y así sucesivamente.
@@ -49,7 +51,7 @@ O, dentro del cliente `mysql`: `SOURCE 01_Esquema_y_Datos.sql;` y así sucesivam
 En resumen:
 
 1. Ejecutar `01_Esquema_y_Datos.sql` para crear la estructura y cargar los datos iniciales.
-2. Ejecutar los scripts del `02` al `07` en orden para implementar toda la lógica avanzada.
+2. Ejecutar los scripts del `02` al `08` en orden para implementar toda la lógica avanzada.
 
 > **Importante:** `01_Esquema_y_Datos.sql` ejecuta `DROP DATABASE IF EXISTS ecommerce_db`; destruye y recrea la base. No lo ejecutes sobre datos que quieras conservar. Los demás scripts eliminan y recrean algunos objetos, y `04_Seguridad.sql` solo instala `validate_password` si aún no está instalado.
 
@@ -67,6 +69,11 @@ CALL sp_RealizarNuevaVenta(5, 3, '[{"id_producto":2,"cantidad":1},{"id_producto"
 CALL sp_ProcesarPago(@venta, 2100000, 'PSE');
 CALL sp_CambiarEstadoPedido(@venta, 'Procesando');
 SELECT * FROM log_estado_pedidos;
+
+-- Devolución transaccional (valida cantidad, repone stock, cambia estado y registra en devoluciones)
+CALL sp_ProcesarDevolucion(3, 7, 2);    -- venta 3 -> 'Devolución Parcial'
+SELECT * FROM devoluciones;
+-- Pruebas automáticas completas (modifican datos): mysql ... < pruebas/pruebas_devoluciones.sql
 
 -- Trigger de precios
 UPDATE productos SET precio = 4300000 WHERE id_producto = 1;
@@ -94,6 +101,7 @@ Todas las contraseñas son de ejemplo para el entorno académico; cámbielas en 
 ## Documentación
 
 La explicación del modelo, seguridad, hashing de contraseñas y límites del entorno está en [`DOCUMENTACION.md`](DOCUMENTACION.md).
+El proceso de devoluciones (`08_Devoluciones.sql`) está documentado en [`DOCUMENTACION_DEVOLUCIONES.md`](DOCUMENTACION_DEVOLUCIONES.md).
 
 ## Entrega
 

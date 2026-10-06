@@ -92,7 +92,7 @@ READS SQL DATA
 BEGIN
     DECLARE v_primera DATETIME;
     SELECT MIN(fecha_venta) INTO v_primera FROM ventas
-    WHERE id_cliente = p_id_cliente AND estado NOT IN ('Cancelado','Devuelto');
+    WHERE id_cliente = p_id_cliente AND estado NOT IN ('Cancelado','Devuelto Totalmente');
     RETURN v_primera IS NOT NULL AND v_primera >= NOW() - INTERVAL 30 DAY;
 END$$
 
@@ -127,7 +127,7 @@ READS SQL DATA
 BEGIN
     DECLARE v_fecha DATETIME;
     SELECT MAX(fecha_venta) INTO v_fecha FROM ventas
-    WHERE id_cliente = p_id_cliente AND estado NOT IN ('Cancelado','Devuelto');
+    WHERE id_cliente = p_id_cliente AND estado NOT IN ('Cancelado','Devuelto Totalmente');
     RETURN v_fecha;
 END$$
 
@@ -159,7 +159,7 @@ READS SQL DATA
 BEGIN
     DECLARE v_n INT;
     SELECT COUNT(*) INTO v_n FROM ventas
-    WHERE id_cliente = p_id_cliente AND estado NOT IN ('Cancelado','Devuelto');
+    WHERE id_cliente = p_id_cliente AND estado NOT IN ('Cancelado','Devuelto Totalmente');
     RETURN v_n;
 END$$
 
@@ -180,7 +180,7 @@ READS SQL DATA
 BEGIN
     DECLARE v_gasto DECIMAL(14,2);
     SELECT COALESCE(SUM(total),0) INTO v_gasto FROM ventas
-    WHERE id_cliente = p_id_cliente AND estado NOT IN ('Cancelado','Devuelto');
+    WHERE id_cliente = p_id_cliente AND estado NOT IN ('Cancelado','Devuelto Totalmente');
     RETURN CASE WHEN v_gasto >= 8000000 THEN 'Oro'
                 WHEN v_gasto >= 3000000 THEN 'Plata'
                 ELSE 'Bronce' END;

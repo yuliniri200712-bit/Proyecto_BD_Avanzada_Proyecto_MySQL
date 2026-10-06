@@ -14,7 +14,7 @@ SELECT p.id_producto,
 FROM detalle_ventas d
 JOIN ventas v    ON v.id_venta = d.id_venta
 JOIN productos p ON p.id_producto = d.id_producto
-WHERE v.estado NOT IN ('Cancelado','Devuelto')
+WHERE v.estado NOT IN ('Cancelado','Devuelto Totalmente')
 GROUP BY p.id_producto, p.nombre
 ORDER BY ingresos DESC
 LIMIT 10;
@@ -22,7 +22,7 @@ LIMIT 10;
 -- 2. Productos con Bajas Ventas: productos en el 10% inferior de ingresos (incluye los que nunca se vendieron).
 WITH ventas_producto AS (
     SELECT p.id_producto, p.nombre,
-           COALESCE(SUM(CASE WHEN v.estado NOT IN ('Cancelado','Devuelto')
+           COALESCE(SUM(CASE WHEN v.estado NOT IN ('Cancelado','Devuelto Totalmente')
                              THEN d.cantidad * d.precio_unitario_congelado END),0) AS ingresos
     FROM productos p
     LEFT JOIN detalle_ventas d ON d.id_producto = p.id_producto
@@ -44,7 +44,7 @@ SELECT c.id_cliente,
        SUM(v.total)                    AS ltv
 FROM clientes c
 JOIN ventas v ON v.id_cliente = c.id_cliente
-WHERE v.estado NOT IN ('Cancelado','Devuelto')
+WHERE v.estado NOT IN ('Cancelado','Devuelto Totalmente')
 GROUP BY c.id_cliente, cliente
 ORDER BY ltv DESC
 LIMIT 5;
@@ -55,7 +55,7 @@ SELECT YEAR(fecha_venta)  AS anio,
        COUNT(*)           AS num_ventas,
        SUM(total)         AS total_ventas
 FROM ventas
-WHERE estado NOT IN ('Cancelado','Devuelto')
+WHERE estado NOT IN ('Cancelado','Devuelto Totalmente')
 GROUP BY anio, mes
 ORDER BY anio, mes;
 
@@ -74,7 +74,7 @@ SELECT COUNT(*)                                        AS clientes_con_compras,
        ROUND(100 * SUM(num_compras > 1) / COUNT(*), 2) AS tasa_compra_repetida_pct
 FROM (SELECT id_cliente, COUNT(*) AS num_compras
       FROM ventas
-      WHERE estado NOT IN ('Cancelado','Devuelto')
+      WHERE estado NOT IN ('Cancelado','Devuelto Totalmente')
       GROUP BY id_cliente) t;
 
 -- 7. Productos Comprados Juntos Frecuentemente: pares de productos presentes en la misma venta.
@@ -100,7 +100,7 @@ LEFT JOIN (SELECT d.id_producto, SUM(d.cantidad * pr.costo) AS costo_vendido
            FROM detalle_ventas d
            JOIN ventas v     ON v.id_venta = d.id_venta
            JOIN productos pr ON pr.id_producto = d.id_producto
-           WHERE v.estado NOT IN ('Cancelado','Devuelto')
+           WHERE v.estado NOT IN ('Cancelado','Devuelto Totalmente')
            GROUP BY d.id_producto) vendido ON vendido.id_producto = p.id_producto
 GROUP BY c.id_categoria, c.nombre
 ORDER BY indice_rotacion DESC;
@@ -123,7 +123,7 @@ JOIN clientes  c ON c.id_cliente = ca.id_cliente
 JOIN productos p ON p.id_producto = ca.id_producto
 WHERE NOT EXISTS (SELECT 1 FROM ventas v
                   WHERE v.id_cliente = ca.id_cliente
-                    AND v.estado NOT IN ('Cancelado','Devuelto')
+                    AND v.estado NOT IN ('Cancelado','Devuelto Totalmente')
                     AND v.fecha_venta >= ca.fecha_agregado - INTERVAL 30 DAY)
 GROUP BY c.id_cliente, cliente, c.email
 ORDER BY valor_carrito DESC;
@@ -136,7 +136,7 @@ SELECT pr.id_proveedor, pr.nombre AS proveedor,
 FROM proveedores pr
 LEFT JOIN productos p      ON p.id_proveedor = pr.id_proveedor
 LEFT JOIN detalle_ventas d ON d.id_producto = p.id_producto
-       AND d.id_venta IN (SELECT id_venta FROM ventas WHERE estado NOT IN ('Cancelado','Devuelto'))
+       AND d.id_venta IN (SELECT id_venta FROM ventas WHERE estado NOT IN ('Cancelado','Devuelto Totalmente'))
 GROUP BY pr.id_proveedor, pr.nombre
 ORDER BY ranking;
 
@@ -147,7 +147,7 @@ SELECT c.region, c.ciudad,
        SUM(v.total)               AS total_ventas
 FROM ventas v
 JOIN clientes c ON c.id_cliente = v.id_cliente
-WHERE v.estado NOT IN ('Cancelado','Devuelto')
+WHERE v.estado NOT IN ('Cancelado','Devuelto Totalmente')
 GROUP BY c.region, c.ciudad WITH ROLLUP;
 
 -- 13. Ventas por Hora del Día: horas pico de compras.
@@ -156,7 +156,7 @@ SELECT HOUR(fecha_venta) AS hora,
        SUM(total)        AS total_ventas,
        RANK() OVER (ORDER BY COUNT(*) DESC) AS ranking_hora
 FROM ventas
-WHERE estado NOT IN ('Cancelado','Devuelto')
+WHERE estado NOT IN ('Cancelado','Devuelto Totalmente')
 GROUP BY hora
 ORDER BY num_ventas DESC, hora;
 
@@ -173,7 +173,7 @@ FROM promociones pm
 JOIN productos p      ON p.id_producto = pm.id_producto
 JOIN detalle_ventas d ON d.id_producto = pm.id_producto
 JOIN ventas v         ON v.id_venta = d.id_venta
-WHERE v.estado NOT IN ('Cancelado','Devuelto')
+WHERE v.estado NOT IN ('Cancelado','Devuelto Totalmente')
   AND v.fecha_venta BETWEEN pm.fecha_inicio - INTERVAL 30 DAY AND pm.fecha_fin + INTERVAL 30 DAY
 GROUP BY pm.codigo, p.nombre, periodo
 ORDER BY pm.codigo, periodo;
@@ -181,13 +181,13 @@ ORDER BY pm.codigo, periodo;
 -- 15. Análisis de Cohort: retención mes a mes desde la primera compra de cada cliente.
 WITH primera AS (
     SELECT id_cliente, DATE_FORMAT(MIN(fecha_venta),'%Y-%m-01') AS cohorte
-    FROM ventas WHERE estado NOT IN ('Cancelado','Devuelto')
+    FROM ventas WHERE estado NOT IN ('Cancelado','Devuelto Totalmente')
     GROUP BY id_cliente
 ), actividad AS (
     SELECT DISTINCT v.id_cliente, p.cohorte,
            TIMESTAMPDIFF(MONTH, p.cohorte, DATE_FORMAT(v.fecha_venta,'%Y-%m-01')) AS mes_desde_inicio
     FROM ventas v JOIN primera p ON p.id_cliente = v.id_cliente
-    WHERE v.estado NOT IN ('Cancelado','Devuelto')
+    WHERE v.estado NOT IN ('Cancelado','Devuelto Totalmente')
 ), tamanio AS (
     SELECT cohorte, COUNT(*) AS clientes_cohorte FROM primera GROUP BY cohorte
 )
@@ -205,7 +205,7 @@ SELECT p.id_producto, p.nombre, p.precio, p.costo,
        COALESCE(SUM(d.cantidad * (d.precio_unitario_congelado - p.costo)),0) AS utilidad_realizada
 FROM productos p
 LEFT JOIN detalle_ventas d ON d.id_producto = p.id_producto
-       AND d.id_venta IN (SELECT id_venta FROM ventas WHERE estado NOT IN ('Cancelado','Devuelto'))
+       AND d.id_venta IN (SELECT id_venta FROM ventas WHERE estado NOT IN ('Cancelado','Devuelto Totalmente'))
 GROUP BY p.id_producto, p.nombre, p.precio, p.costo
 ORDER BY margen_pct DESC;
 
@@ -213,7 +213,7 @@ ORDER BY margen_pct DESC;
 WITH compras AS (
     SELECT id_cliente, fecha_venta,
            LAG(fecha_venta) OVER (PARTITION BY id_cliente ORDER BY fecha_venta) AS compra_anterior
-    FROM ventas WHERE estado NOT IN ('Cancelado','Devuelto')
+    FROM ventas WHERE estado NOT IN ('Cancelado','Devuelto Totalmente')
 )
 SELECT c.id_cliente, CONCAT(cl.nombre,' ',cl.apellido) AS cliente,
        COUNT(*) + 1                                              AS num_compras,
@@ -236,7 +236,7 @@ LEFT JOIN (SELECT id_producto, COUNT(*) AS visitas FROM visitas_producto GROUP B
        ON vis.id_producto = p.id_producto
 LEFT JOIN (SELECT d.id_producto, SUM(d.cantidad) AS unidades
            FROM detalle_ventas d JOIN ventas v ON v.id_venta = d.id_venta
-           WHERE v.estado NOT IN ('Cancelado','Devuelto')
+           WHERE v.estado NOT IN ('Cancelado','Devuelto Totalmente')
            GROUP BY d.id_producto) ven ON ven.id_producto = p.id_producto
 WHERE vis.visitas IS NOT NULL OR ven.unidades IS NOT NULL
 ORDER BY visitas DESC, unidades_compradas DESC;
@@ -248,7 +248,7 @@ WITH base AS (
            COUNT(v.id_venta)                       AS frecuencia,
            SUM(v.total)                            AS monetario
     FROM clientes c JOIN ventas v ON v.id_cliente = c.id_cliente
-    WHERE v.estado NOT IN ('Cancelado','Devuelto')
+    WHERE v.estado NOT IN ('Cancelado','Devuelto Totalmente')
     GROUP BY c.id_cliente, cliente
 ), puntajes AS (
     SELECT b.*,
@@ -279,7 +279,7 @@ WITH mensual AS (
     JOIN detalle_ventas d ON d.id_venta = v.id_venta
     JOIN productos p      ON p.id_producto = d.id_producto
     JOIN categorias c     ON c.id_categoria = p.id_categoria
-    WHERE c.nombre = @categoria COLLATE utf8mb4_unicode_ci AND v.estado NOT IN ('Cancelado','Devuelto')
+    WHERE c.nombre = @categoria COLLATE utf8mb4_unicode_ci AND v.estado NOT IN ('Cancelado','Devuelto Totalmente')
     GROUP BY periodo
 ), numerado AS (
     SELECT periodo, unidades, ingresos, ROW_NUMBER() OVER (ORDER BY periodo) AS x FROM mensual

@@ -154,8 +154,8 @@ BEGIN
     SELECT estado INTO v_estado FROM ventas WHERE id_venta = NEW.id_venta;
     IF v_estado IS NULL THEN
         SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'La venta no existe';
-    ELSEIF v_estado IN ('Cancelado','Devuelto') THEN
-        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'No se pueden agregar productos a una venta cerrada';
+    ELSEIF v_estado IN ('Cancelado','Devolución Parcial','Devuelto Totalmente') THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'No se pueden agregar productos a una venta cerrada o en devolución';
     END IF;
     SELECT stock, activo INTO v_stock, v_activo FROM productos WHERE id_producto = NEW.id_producto;
     IF v_stock IS NULL THEN
@@ -212,7 +212,7 @@ BEGIN
         UPDATE clientes
         SET total_gastado = (SELECT COALESCE(SUM(total),0) FROM ventas
                              WHERE id_cliente = NEW.id_cliente
-                               AND estado NOT IN ('Cancelado','Devuelto'))
+                               AND estado NOT IN ('Cancelado','Devuelto Totalmente'))
         WHERE id_cliente = NEW.id_cliente;
     END IF;
 END$$
@@ -237,7 +237,7 @@ BEGIN
     UPDATE clientes
     SET total_gastado = (SELECT COALESCE(SUM(total),0) FROM ventas
                          WHERE id_cliente = NEW.id_cliente
-                           AND estado NOT IN ('Cancelado','Devuelto'))
+                           AND estado NOT IN ('Cancelado','Devuelto Totalmente'))
     WHERE id_cliente = NEW.id_cliente;
 END$$
 
@@ -248,7 +248,7 @@ BEGIN
     UPDATE clientes
     SET total_gastado = (SELECT COALESCE(SUM(total),0) FROM ventas
                          WHERE id_cliente = OLD.id_cliente
-                           AND estado NOT IN ('Cancelado','Devuelto'))
+                           AND estado NOT IN ('Cancelado','Devuelto Totalmente'))
     WHERE id_cliente = OLD.id_cliente;
 END$$
 
@@ -310,8 +310,9 @@ BEGIN
 
     SELECT estado INTO v_estado_anterior FROM ventas WHERE id_venta = OLD.id_venta;
     SELECT estado INTO v_estado_nuevo FROM ventas WHERE id_venta = NEW.id_venta;
-    IF v_estado_anterior IN ('Cancelado','Devuelto') OR v_estado_nuevo IN ('Cancelado','Devuelto') THEN
-        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'No se pueden modificar detalles de ventas cerradas';
+    IF v_estado_anterior IN ('Cancelado','Devolución Parcial','Devuelto Totalmente')
+       OR v_estado_nuevo IN ('Cancelado','Devolución Parcial','Devuelto Totalmente') THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'No se pueden modificar detalles de ventas cerradas o en devolución';
     END IF;
 
     IF NEW.id_producto <> OLD.id_producto OR NEW.cantidad > OLD.cantidad THEN
@@ -335,7 +336,7 @@ FOR EACH ROW
 BEGIN
     DECLARE v_estado VARCHAR(30);
     SELECT estado INTO v_estado FROM ventas WHERE id_venta = OLD.id_venta;
-    IF v_estado IS NOT NULL AND v_estado NOT IN ('Cancelado','Devuelto') THEN
+    IF v_estado IS NOT NULL AND v_estado NOT IN ('Cancelado','Devuelto Totalmente') THEN
         UPDATE productos SET stock = stock + OLD.cantidad WHERE id_producto = OLD.id_producto;
         UPDATE ventas SET total = fn_CalcularTotalVenta(OLD.id_venta) WHERE id_venta = OLD.id_venta;
     END IF;
@@ -382,7 +383,7 @@ CREATE TRIGGER trg_archive_deleted_venta
 BEFORE DELETE ON ventas
 FOR EACH ROW
 BEGIN
-    IF OLD.estado NOT IN ('Cancelado','Devuelto') THEN
+    IF OLD.estado NOT IN ('Cancelado','Devuelto Totalmente') THEN
         UPDATE productos p
         JOIN (SELECT id_producto, SUM(cantidad) AS unidades
               FROM detalle_ventas WHERE id_venta = OLD.id_venta GROUP BY id_producto) d

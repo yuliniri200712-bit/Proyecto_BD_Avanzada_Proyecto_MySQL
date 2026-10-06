@@ -1,13 +1,13 @@
 -- =====================================================================
 -- 07_Procedimientos_Almacenados.sql
--- 20 procedimientos almacenados (operaciones complejas y transaccionales)
+-- 19 procedimientos almacenados (operaciones complejas y transaccionales).
+-- El nº 4, sp_ProcesarDevolucion, está en 08_Devoluciones.sql.
 -- =====================================================================
 USE ecommerce_db;
 
 DROP PROCEDURE IF EXISTS sp_RealizarNuevaVenta;
 DROP PROCEDURE IF EXISTS sp_AgregarNuevoProducto;
 DROP PROCEDURE IF EXISTS sp_ActualizarDireccionCliente;
-DROP PROCEDURE IF EXISTS sp_ProcesarDevolucion;
 DROP PROCEDURE IF EXISTS sp_ObtenerHistorialComprasCliente;
 DROP PROCEDURE IF EXISTS sp_AjustarNivelStock;
 DROP PROCEDURE IF EXISTS sp_EliminarClienteDeFormaSegura;
@@ -162,63 +162,8 @@ BEGIN
            @pedidos_actualizados AS pedidos_abiertos_actualizados;
 END$$
 
--- 4. sp_ProcesarDevolucion: devuelve unidades de un producto de una venta, repone stock
---    y genera un crédito a favor del cliente por el precio congelado.
-CREATE PROCEDURE sp_ProcesarDevolucion(
-    IN p_id_venta    INT,
-    IN p_id_producto INT,
-    IN p_cantidad    INT,
-    IN p_motivo      VARCHAR(255))
-BEGIN
-    DECLARE v_comprado   INT;
-    DECLARE v_devuelto   INT;
-    DECLARE v_precio     DECIMAL(12,2);
-    DECLARE v_estado     VARCHAR(30);
-    DECLARE v_id_cliente INT;
-    DECLARE v_credito    DECIMAL(12,2);
-    DECLARE EXIT HANDLER FOR SQLEXCEPTION BEGIN ROLLBACK; RESIGNAL; END;
-
-    START TRANSACTION;
-    SELECT estado, id_cliente INTO v_estado, v_id_cliente
-    FROM ventas WHERE id_venta = p_id_venta FOR UPDATE;
-    IF v_estado IS NULL THEN
-        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'La venta no existe';
-    ELSEIF v_estado NOT IN ('Entregado','Enviado') THEN
-        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Solo se aceptan devoluciones de pedidos enviados o entregados';
-    END IF;
-
-    SELECT SUM(cantidad), MAX(precio_unitario_congelado) INTO v_comprado, v_precio
-    FROM detalle_ventas WHERE id_venta = p_id_venta AND id_producto = p_id_producto;
-    -- unidades ya devueltas antes para esta venta/producto
-    SELECT COALESCE(SUM(ROUND(monto / v_precio)),0) INTO v_devuelto
-    FROM creditos_cliente WHERE id_venta = p_id_venta AND motivo LIKE CONCAT('DEV#', p_id_producto, '#%');
-
-    IF v_comprado IS NULL THEN
-        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'El producto no pertenece a esa venta';
-    ELSEIF p_cantidad <= 0 OR p_cantidad > v_comprado - v_devuelto THEN
-        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Cantidad a devolver inválida';
-    END IF;
-
-    SET v_credito = p_cantidad * v_precio;
-
-    UPDATE productos SET stock = stock + p_cantidad WHERE id_producto = p_id_producto;
-    INSERT INTO creditos_cliente (id_cliente, id_venta, monto, motivo)
-    VALUES (v_id_cliente, p_id_venta, v_credito, CONCAT('DEV#', p_id_producto, '# ', COALESCE(p_motivo,'')));
-    -- si se devolvió todo el pedido, la venta pasa a 'Devuelto'
-    IF (SELECT SUM(cantidad) FROM detalle_ventas WHERE id_venta = p_id_venta) =
-       (SELECT COALESCE(SUM(ROUND(c.monto / d.precio_unitario_congelado)),0)
-          FROM creditos_cliente c
-          JOIN detalle_ventas d ON d.id_venta = c.id_venta
-               AND c.motivo LIKE CONCAT('DEV#', d.id_producto, '#%')
-         WHERE c.id_venta = p_id_venta) THEN
-        UPDATE ventas SET estado = 'Devuelto' WHERE id_venta = p_id_venta;
-    END IF;
-    COMMIT;
-
-    SELECT p_id_venta AS id_venta, p_id_producto AS id_producto, p_cantidad AS unidades_devueltas,
-           v_credito AS credito_generado,
-           (SELECT SUM(monto) FROM creditos_cliente WHERE id_cliente = v_id_cliente) AS saldo_credito_cliente;
-END$$
+-- 4. sp_ProcesarDevolucion: se define en 08_Devoluciones.sql junto con la tabla
+--    devoluciones (actividad "Proceso de Devolución Completo").
 
 -- 5. sp_ObtenerHistorialComprasCliente: resumen + detalle de todas las compras de un cliente.
 CREATE PROCEDURE sp_ObtenerHistorialComprasCliente(IN p_id_cliente INT)
@@ -339,10 +284,10 @@ BEGIN
 
     -- a) Resumen general
     SELECT DATE_FORMAT(v_ini,'%Y-%m')                                           AS periodo,
-           SUM(estado NOT IN ('Cancelado','Devuelto'))                          AS ventas_validas,
+           SUM(estado NOT IN ('Cancelado','Devuelto Totalmente'))                          AS ventas_validas,
            SUM(estado = 'Cancelado')                                            AS ventas_canceladas,
-           COALESCE(SUM(CASE WHEN estado NOT IN ('Cancelado','Devuelto') THEN total END),0) AS ingresos,
-           COALESCE(ROUND(AVG(CASE WHEN estado NOT IN ('Cancelado','Devuelto') THEN total END),2),0) AS ticket_promedio,
+           COALESCE(SUM(CASE WHEN estado NOT IN ('Cancelado','Devuelto Totalmente') THEN total END),0) AS ingresos,
+           COALESCE(ROUND(AVG(CASE WHEN estado NOT IN ('Cancelado','Devuelto Totalmente') THEN total END),2),0) AS ticket_promedio,
            COUNT(DISTINCT id_cliente)                                           AS clientes_compradores
         FROM ventas
         WHERE DATE(fecha_venta) BETWEEN v_ini AND v_fin
@@ -355,7 +300,7 @@ BEGIN
     FROM ventas v JOIN detalle_ventas d ON d.id_venta = v.id_venta
     JOIN productos p ON p.id_producto = d.id_producto
     JOIN categorias c ON c.id_categoria = p.id_categoria
-        WHERE DATE(v.fecha_venta) BETWEEN v_ini AND v_fin AND v.estado NOT IN ('Cancelado','Devuelto')
+        WHERE DATE(v.fecha_venta) BETWEEN v_ini AND v_fin AND v.estado NOT IN ('Cancelado','Devuelto Totalmente')
             AND (v_sucursal IS NULL OR v.id_sucursal = v_sucursal)
     GROUP BY c.nombre ORDER BY ingresos DESC;
 
@@ -363,14 +308,14 @@ BEGIN
     SELECT p.nombre, SUM(d.cantidad) AS unidades, SUM(d.cantidad * d.precio_unitario_congelado) AS ingresos
     FROM ventas v JOIN detalle_ventas d ON d.id_venta = v.id_venta
     JOIN productos p ON p.id_producto = d.id_producto
-        WHERE DATE(v.fecha_venta) BETWEEN v_ini AND v_fin AND v.estado NOT IN ('Cancelado','Devuelto')
+        WHERE DATE(v.fecha_venta) BETWEEN v_ini AND v_fin AND v.estado NOT IN ('Cancelado','Devuelto Totalmente')
             AND (v_sucursal IS NULL OR v.id_sucursal = v_sucursal)
     GROUP BY p.nombre ORDER BY ingresos DESC LIMIT 5;
 
     -- d) Ventas por sucursal
     SELECT s.nombre AS sucursal, COUNT(v.id_venta) AS ventas, COALESCE(SUM(v.total),0) AS ingresos
     FROM sucursales s LEFT JOIN ventas v ON v.id_sucursal = s.id_sucursal
-            AND DATE(v.fecha_venta) BETWEEN v_ini AND v_fin AND v.estado NOT IN ('Cancelado','Devuelto')
+            AND DATE(v.fecha_venta) BETWEEN v_ini AND v_fin AND v.estado NOT IN ('Cancelado','Devuelto Totalmente')
             AND (v_sucursal IS NULL OR v.id_sucursal = v_sucursal)
         WHERE v_sucursal IS NULL OR s.id_sucursal = v_sucursal
     GROUP BY s.nombre ORDER BY ingresos DESC;
@@ -404,8 +349,9 @@ BEGIN
         WHEN v_actual = 'Pendiente de Pago' AND p_nuevo_estado IN ('Pagado','Cancelado')      THEN TRUE
         WHEN v_actual = 'Pagado'            AND p_nuevo_estado IN ('Procesando','Cancelado')   THEN TRUE
         WHEN v_actual = 'Procesando'        AND p_nuevo_estado IN ('Enviado','Cancelado')      THEN TRUE
-        WHEN v_actual = 'Enviado'           AND p_nuevo_estado IN ('Entregado','Devuelto')     THEN TRUE
-        WHEN v_actual = 'Entregado'         AND p_nuevo_estado = 'Devuelto'                    THEN TRUE
+        WHEN v_actual = 'Enviado'           AND p_nuevo_estado = 'Entregado'                   THEN TRUE
+        -- Los estados de devolución NO se asignan aquí: los fija sp_ProcesarDevolucion
+        -- (08_Devoluciones.sql), que además repone el stock y registra la devolución.
         ELSE FALSE END;
     IF NOT v_permitido THEN
         SET @msg = CONCAT('Transición no permitida: ', v_actual, ' -> ', p_nuevo_estado);
@@ -466,7 +412,7 @@ BEGIN
            c.id_categoria, c.nombre AS categoria,
            pr.id_proveedor, pr.nombre AS proveedor, pr.email_contacto, pr.telefono_contacto,
            (SELECT COALESCE(SUM(d.cantidad),0) FROM detalle_ventas d JOIN ventas v ON v.id_venta = d.id_venta
-             WHERE d.id_producto = p.id_producto AND v.estado NOT IN ('Cancelado','Devuelto')) AS unidades_vendidas,
+             WHERE d.id_producto = p.id_producto AND v.estado NOT IN ('Cancelado','Devuelto Totalmente')) AS unidades_vendidas,
            (SELECT ROUND(AVG(calificacion),1) FROM resenas r WHERE r.id_producto = p.id_producto) AS calificacion_promedio,
            (SELECT COUNT(*) FROM resenas r WHERE r.id_producto = p.id_producto) AS num_resenas,
            (SELECT COUNT(*) FROM visitas_producto vp WHERE vp.id_producto = p.id_producto) AS visitas
@@ -505,7 +451,7 @@ BEGIN
         -- recalcular métricas del principal
         UPDATE clientes
         SET total_gastado = (SELECT COALESCE(SUM(total),0) FROM ventas
-                             WHERE id_cliente = p_id_principal AND estado NOT IN ('Cancelado','Devuelto')),
+                             WHERE id_cliente = p_id_principal AND estado NOT IN ('Cancelado','Devuelto Totalmente')),
             fecha_ultimo_pedido = (SELECT MAX(fecha_venta) FROM ventas WHERE id_cliente = p_id_principal),
             nivel_lealtad = fn_DeterminarEstadoLealtad(p_id_principal)
         WHERE id_cliente = p_id_principal;
@@ -569,7 +515,7 @@ BEGIN
     LEFT JOIN categorias c ON c.id_categoria = p.id_categoria
     LEFT JOIN (SELECT d.id_producto, SUM(d.cantidad) AS unidades
                FROM detalle_ventas d JOIN ventas v ON v.id_venta = d.id_venta
-                             WHERE v.estado NOT IN ('Cancelado','Devuelto')
+                             WHERE v.estado NOT IN ('Cancelado','Devuelto Totalmente')
                                  AND (v_sucursal IS NULL OR v.id_sucursal = v_sucursal)
                              GROUP BY d.id_producto) ventas
            ON ventas.id_producto = p.id_producto
@@ -591,16 +537,16 @@ CREATE PROCEDURE sp_ObtenerDashboardAdmin()
 BEGIN
     SELECT
       (SELECT COALESCE(SUM(total),0) FROM ventas WHERE DATE(fecha_venta) = CURDATE()
-          AND estado NOT IN ('Cancelado','Devuelto'))                                   AS ventas_hoy,
+          AND estado NOT IN ('Cancelado','Devuelto Totalmente'))                                   AS ventas_hoy,
       (SELECT COUNT(*) FROM ventas WHERE DATE(fecha_venta) = CURDATE())                 AS pedidos_hoy,
       (SELECT COALESCE(SUM(total),0) FROM ventas WHERE fecha_venta >= DATE_FORMAT(CURDATE(),'%Y-%m-01')
-          AND estado NOT IN ('Cancelado','Devuelto'))                                   AS ventas_mes,
+          AND estado NOT IN ('Cancelado','Devuelto Totalmente'))                                   AS ventas_mes,
       (SELECT COUNT(*) FROM clientes WHERE DATE(fecha_registro) = CURDATE())            AS clientes_nuevos_hoy,
       (SELECT COUNT(*) FROM clientes WHERE fecha_registro >= NOW() - INTERVAL 30 DAY)   AS clientes_nuevos_30d,
       (SELECT COUNT(*) FROM ventas WHERE estado = 'Pendiente de Pago')                  AS pedidos_pendientes_pago,
       (SELECT COUNT(*) FROM ventas WHERE estado IN ('Pagado','Procesando'))             AS pedidos_por_despachar,
       (SELECT COUNT(*) FROM productos WHERE activo = TRUE AND stock < stock_minimo)     AS productos_bajo_stock,
-      (SELECT ROUND(AVG(total),2) FROM ventas WHERE estado NOT IN ('Cancelado','Devuelto')) AS ticket_promedio_historico,
+      (SELECT ROUND(AVG(total),2) FROM ventas WHERE estado NOT IN ('Cancelado','Devuelto Totalmente')) AS ticket_promedio_historico,
       (SELECT COUNT(*) FROM carritos)                                                   AS productos_en_carritos;
 
     -- Últimos 5 pedidos
@@ -685,10 +631,10 @@ BEGIN
         JOIN productos p      ON p.id_producto = d.id_producto
         WHERE v.id_cliente IN (SELECT v2.id_cliente FROM ventas v2
                                JOIN detalle_ventas d2 ON d2.id_venta = v2.id_venta
-                                                             WHERE d2.id_producto = p_id_producto AND v2.estado NOT IN ('Cancelado','Devuelto')
+                                                             WHERE d2.id_producto = p_id_producto AND v2.estado NOT IN ('Cancelado','Devuelto Totalmente')
                                                                  AND (v_sucursal IS NULL OR v2.id_sucursal = v_sucursal))
           AND d.id_producto <> p_id_producto AND p.activo = TRUE
-          AND v.estado NOT IN ('Cancelado','Devuelto')
+          AND v.estado NOT IN ('Cancelado','Devuelto Totalmente')
           AND (v_sucursal IS NULL OR v.id_sucursal = v_sucursal)
         GROUP BY p.id_producto, p.nombre, p.precio
         UNION ALL

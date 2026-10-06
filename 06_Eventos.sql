@@ -177,14 +177,14 @@ BEGIN
            COALESCE(SUM(d.cantidad),0),
            COALESCE((SELECT SUM(total) FROM ventas
                      WHERE DATE(fecha_venta) BETWEEN v_ini AND v_fin
-                       AND estado NOT IN ('Cancelado','Devuelto')),0),
+                       AND estado NOT IN ('Cancelado','Devuelto Totalmente')),0),
            COALESCE((SELECT AVG(total) FROM ventas
                      WHERE DATE(fecha_venta) BETWEEN v_ini AND v_fin
-                       AND estado NOT IN ('Cancelado','Devuelto')),0)
+                       AND estado NOT IN ('Cancelado','Devuelto Totalmente')),0)
     FROM ventas v
     LEFT JOIN detalle_ventas d ON d.id_venta = v.id_venta
     WHERE DATE(v.fecha_venta) BETWEEN v_ini AND v_fin
-      AND v.estado NOT IN ('Cancelado','Devuelto')
+      AND v.estado NOT IN ('Cancelado','Devuelto Totalmente')
     ON DUPLICATE KEY UPDATE num_ventas = VALUES(num_ventas),
                             unidades_vendidas = VALUES(unidades_vendidas),
                             total_ventas = VALUES(total_ventas),
@@ -288,7 +288,7 @@ DO
            COUNT(DISTINCT v.id_cliente)
     FROM ventas v LEFT JOIN detalle_ventas d ON d.id_venta = v.id_venta
     WHERE DATE(v.fecha_venta) = CURDATE() - INTERVAL 1 DAY
-      AND v.estado NOT IN ('Cancelado','Devuelto')
+      AND v.estado NOT IN ('Cancelado','Devuelto Totalmente')
     ON DUPLICATE KEY UPDATE num_ventas = VALUES(num_ventas), unidades = VALUES(unidades),
                             total = VALUES(total), clientes_unicos = VALUES(clientes_unicos)$$
 
@@ -343,7 +343,7 @@ BEGIN
     FROM detalle_ventas d
     JOIN ventas v    ON v.id_venta = d.id_venta
     JOIN productos p ON p.id_producto = d.id_producto
-    WHERE v.fecha_venta >= NOW() - INTERVAL 30 DAY AND v.estado NOT IN ('Cancelado','Devuelto')
+    WHERE v.fecha_venta >= NOW() - INTERVAL 30 DAY AND v.estado NOT IN ('Cancelado','Devuelto Totalmente')
     GROUP BY p.id_producto, p.nombre;
 END$$
 
@@ -378,16 +378,16 @@ BEGIN
     INSERT INTO kpis_mensuales (periodo, ventas_totales, num_ventas, ticket_promedio, clientes_nuevos,
                                 clientes_activos, margen_bruto, tasa_cancelacion, calculado_en)
     SELECT DATE_FORMAT(v_ini,'%Y-%m'),
-           COALESCE(SUM(CASE WHEN estado NOT IN ('Cancelado','Devuelto') THEN total END),0),
-           SUM(estado NOT IN ('Cancelado','Devuelto')),
-           COALESCE(AVG(CASE WHEN estado NOT IN ('Cancelado','Devuelto') THEN total END),0),
+           COALESCE(SUM(CASE WHEN estado NOT IN ('Cancelado','Devuelto Totalmente') THEN total END),0),
+           SUM(estado NOT IN ('Cancelado','Devuelto Totalmente')),
+           COALESCE(AVG(CASE WHEN estado NOT IN ('Cancelado','Devuelto Totalmente') THEN total END),0),
            (SELECT COUNT(*) FROM clientes WHERE DATE(fecha_registro) BETWEEN v_ini AND v_fin),
            COUNT(DISTINCT id_cliente),
            (SELECT COALESCE(SUM(d.cantidad*(d.precio_unitario_congelado - p.costo)),0)
               FROM detalle_ventas d JOIN ventas v2 ON v2.id_venta = d.id_venta
               JOIN productos p ON p.id_producto = d.id_producto
              WHERE DATE(v2.fecha_venta) BETWEEN v_ini AND v_fin
-               AND v2.estado NOT IN ('Cancelado','Devuelto')),
+               AND v2.estado NOT IN ('Cancelado','Devuelto Totalmente')),
            COALESCE(ROUND(100*SUM(estado='Cancelado')/NULLIF(COUNT(*),0),2),0),
            NOW()
     FROM ventas
@@ -411,7 +411,7 @@ BEGIN
     JOIN detalle_ventas d ON d.id_venta = v.id_venta
     JOIN productos p      ON p.id_producto = d.id_producto
     JOIN categorias c     ON c.id_categoria = p.id_categoria
-    WHERE v.estado NOT IN ('Cancelado','Devuelto')
+    WHERE v.estado NOT IN ('Cancelado','Devuelto Totalmente')
     GROUP BY DATE_FORMAT(v.fecha_venta,'%Y-%m'), c.nombre;
 END$$
 
@@ -469,7 +469,7 @@ BEGIN
     LEFT JOIN detalle_ventas d ON d.id_producto = p.id_producto
          AND d.id_venta IN (SELECT id_venta FROM ventas
                             WHERE DATE(fecha_venta) BETWEEN v_ini AND v_fin
-                              AND estado NOT IN ('Cancelado','Devuelto'))
+                              AND estado NOT IN ('Cancelado','Devuelto Totalmente'))
     GROUP BY pr.id_proveedor, pr.nombre
     ON DUPLICATE KEY UPDATE productos_vendidos = VALUES(productos_vendidos), unidades = VALUES(unidades),
         ingresos = VALUES(ingresos), margen = VALUES(margen), ranking = VALUES(ranking);
